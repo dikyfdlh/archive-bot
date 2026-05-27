@@ -1,0 +1,21 @@
+# Letakkan di /etc/caddy/Caddyfile (atau pakai install.sh yang generate otomatis).
+# Ganti "arsip.domain-kamu.com" dengan domain asli.
+
+{
+  email admin@domain-kamu.com
+}
+
+arsip.domain-kamu.com {
+    encode zstd gzip
+
+    # WhatsApp Cloud kirim event sampai ~10 MB. Beri sedikit margin.
+    request_body { max_size 12MB }
+
+    @nocache path /webhook* /api/admin/* /admin
+    header @nocache Cache-Control "no-store"
+
+    reverse_proxy 127.0.0.1:3000 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-For {remote_host}
+    }
+}
