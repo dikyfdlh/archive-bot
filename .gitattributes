@@ -1,0 +1,17 @@
+# Default: let git auto-handle
+* text=auto eol=lf
+
+# Force LF for files that MUST run on Linux
+*.sh        text eol=lf
+*.mjs       text eol=lf
+*.js        text eol=lf
+Caddyfile   text eol=lf
+*.service   text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+
+# Binary - jangan diutak-atik
+*.png       binary
+*.jpg       binary
+*.pdf       binary
+*.zip       binary
