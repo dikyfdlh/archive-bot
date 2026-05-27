@@ -2,7 +2,22 @@
 .env.*
 !/.env.example
 data/archive-index.json
+data/*.json
 node_modules/
 npm-debug.log*
+*.log
+logs/
 .DS_Store
 Thumbs.db
+
+# Defensive: jangan commit credential Drive lokal
+service-account.json
+google-credentials.json
+*.pem
+*.key
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.bak
