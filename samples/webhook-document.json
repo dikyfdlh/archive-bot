@@ -1,0 +1,42 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "6280000000000",
+              "phone_number_id": "PHONE_NUMBER_ID"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Tester"
+                },
+                "wa_id": "6281234567890"
+              }
+            ],
+            "messages": [
+              {
+                "from": "6281234567890",
+                "id": "wamid.TEST_DOCUMENT_001",
+                "timestamp": "1779860000",
+                "type": "document",
+                "document": {
+                  "id": "MEDIA_ID_FROM_WHATSAPP",
+                  "filename": "contoh.pdf",
+                  "mime_type": "application/pdf",
+                  "caption": "#invoice #pajak"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
