@@ -578,6 +578,20 @@ function renderAdminHtml(config) {
       border: 1px solid var(--line);
     }
     button.secondary:hover { background: #e4e9f1; }
+    .btn-back {
+      display: inline-flex; align-items: center;
+      padding: 10px 14px;
+      border-radius: 7px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 650;
+      background: #eef2f7;
+      color: #283544 !important;
+      border: 1px solid var(--line);
+      text-decoration: none !important;
+      transition: background .15s ease;
+    }
+    .btn-back:hover { background: #e4e9f1; }
     .actions {
       display: flex;
       gap: 10px;
@@ -631,6 +645,7 @@ function renderAdminHtml(config) {
         <div class="sub">Edit file .env dari browser. Simpan lalu restart server.</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <a class="btn-back" href="/">← Dashboard</a>
         <button class="secondary" id="reloadBtn" type="button">Reload</button>
         <button class="secondary" id="logoutBtn" type="button">Logout</button>
       </div>

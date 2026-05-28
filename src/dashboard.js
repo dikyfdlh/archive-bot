@@ -295,6 +295,20 @@ export function renderDashboardHtml(state) {
     a:hover { text-decoration: underline; }
     .copy-flash { color: var(--ok); font-size: 12px; opacity: 0; transition: opacity .2s; }
     .copy-flash.show { opacity: 1; }
+    .nav-btn {
+      display: inline-flex; align-items: center;
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .3px;
+      background: linear-gradient(135deg, var(--accent), #22d3ee);
+      color: white !important;
+      text-decoration: none !important;
+      box-shadow: 0 4px 12px rgba(76,141,255,.35);
+      transition: transform .15s ease;
+    }
+    .nav-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
   </style>
 </head>
 <body>
@@ -311,6 +325,7 @@ export function renderDashboardHtml(state) {
         ${statusPill}
         <span class="pill muted">uptime ${formatUptime(state.uptimeSec)}</span>
         <span class="pill muted">node ${escape(state.nodeVersion)}</span>
+        <a class="nav-btn" href="/admin">Admin →</a>
       </div>
     </header>
 
