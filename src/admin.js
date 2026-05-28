@@ -59,7 +59,73 @@ const ORDERED_KEYS = ENV_FIELDS.flatMap((group) => group.fields.map((item) => it
 
 export async function handleAdminRequest(req, res, url, config) {
   if (req.method === "GET" && url.pathname === "/admin") {
-    sendHtml(res, 200, renderAdminHtml(config));
+    if (!config.adminToken) {
+      if (isLocalRequest(req)) {
+        sendHtml(res, 200, renderAdminHtml(config));
+      } else {
+        sendHtml(res, 503, renderSetupRequiredHtml());
+      }
+      return true;
+    }
+
+    if (isAuthorized(req, url, config)) {
+      sendHtml(res, 200, renderAdminHtml(config));
+    } else {
+      sendHtml(res, 200, renderLoginHtml());
+    }
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/admin/login") {
+    const rawBody = await readRawBody(req, MAX_ADMIN_BODY_BYTES);
+    const payload = parseJsonBody(rawBody);
+    const provided = String(payload.password || "").trim();
+
+    if (!config.adminToken) {
+      sendJson(res, 401, {
+        ok: false,
+        error: "ADMIN_TOKEN belum diset di server. Isi field ADMIN_TOKEN di .env lalu restart bot."
+      });
+      return true;
+    }
+
+    if (!provided) {
+      await sleep(400);
+      sendJson(res, 401, { ok: false, error: "Password wajib diisi." });
+      return true;
+    }
+
+    const expectedBuffer = Buffer.from(config.adminToken);
+    const providedBuffer = Buffer.from(provided);
+
+    const valid =
+      expectedBuffer.length === providedBuffer.length &&
+      crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+
+    if (!valid) {
+      await sleep(400);
+      sendJson(res, 401, { ok: false, error: "Password salah." });
+      return true;
+    }
+
+    const secure = isHttpsRequest(req) ? " Secure;" : "";
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Set-Cookie": `admin_token=${encodeURIComponent(provided)}; Path=/;${secure} HttpOnly; SameSite=Strict; Max-Age=86400`
+    });
+    res.end(JSON.stringify({ ok: true }));
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/admin/logout") {
+    const secure = isHttpsRequest(req) ? " Secure;" : "";
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Set-Cookie": `admin_token=; Path=/;${secure} HttpOnly; SameSite=Strict; Max-Age=0`
+    });
+    res.end(JSON.stringify({ ok: true }));
     return true;
   }
 
@@ -169,6 +235,16 @@ function getProvidedToken(req, url) {
 function isLocalRequest(req) {
   const address = req.socket.remoteAddress || "";
   return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
+}
+
+function isHttpsRequest(req) {
+  if (req.socket?.encrypted) return true;
+  const forwarded = String(req.headers["x-forwarded-proto"] || "").toLowerCase();
+  return forwarded.split(",")[0].trim() === "https";
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function readEnvFile() {
@@ -554,21 +630,17 @@ function renderAdminHtml(config) {
         <h1>Archive Manager Bot Config</h1>
         <div class="sub">Edit file .env dari browser. Simpan lalu restart server.</div>
       </div>
-      <button class="secondary" id="reloadBtn" type="button">Reload</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="secondary" id="reloadBtn" type="button">Reload</button>
+        <button class="secondary" id="logoutBtn" type="button">Logout</button>
+      </div>
     </div>
   </header>
   <main class="wrap">
     <section class="auth">
-      <div class="grid">
-        <div class="${needsToken ? "" : "full"}">
-          <label for="adminToken">Admin token</label>
-          <input id="adminToken" type="password" autocomplete="current-password" placeholder="${needsToken ? "Masukkan ADMIN_TOKEN" : "Kosong jika akses dari localhost"}">
-          <div class="hint">${needsToken ? "Token diperlukan karena ADMIN_TOKEN sudah diisi." : "ADMIN_TOKEN belum aktif. Akses tanpa token hanya diizinkan dari localhost."}</div>
-        </div>
-        <div>
-          <label>Status konfigurasi</label>
-          <div id="missing" class="missing"></div>
-        </div>
+      <div>
+        <label>Status konfigurasi</label>
+        <div id="missing" class="missing"></div>
       </div>
     </section>
     <div id="notice" class="notice"></div>
@@ -581,20 +653,15 @@ function renderAdminHtml(config) {
   <script>
     const form = document.querySelector("#envForm");
     const notice = document.querySelector("#notice");
-    const adminToken = document.querySelector("#adminToken");
     const missing = document.querySelector("#missing");
     const reloadBtn = document.querySelector("#reloadBtn");
     const saveBtn = document.querySelector("#saveBtn");
     const copyWebhookBtn = document.querySelector("#copyWebhookBtn");
+    const logoutBtn = document.querySelector("#logoutBtn");
     let schema = [];
 
-    adminToken.value = localStorage.getItem("archive_admin_token") || "";
-
-    function headers() {
-      const token = adminToken.value.trim();
-      if (token) localStorage.setItem("archive_admin_token", token);
-      return token ? { "X-Admin-Token": token } : {};
-    }
+    // Auth via HttpOnly cookie - browser kirim otomatis di same-origin fetch.
+    function headers() { return {}; }
 
     function show(message, type = "ok") {
       notice.textContent = message;
@@ -695,8 +762,14 @@ function renderAdminHtml(config) {
       return hints[key] || "";
     }
 
+    function handleUnauthorized() {
+      // cookie expired / hilang -> kembali ke login page
+      location.href = "/admin";
+    }
+
     async function loadConfig() {
-      const response = await fetch("/api/admin/env", { headers: headers() });
+      const response = await fetch("/api/admin/env", { credentials: "same-origin" });
+      if (response.status === 401) { handleUnauthorized(); return; }
       const data = await response.json();
       if (!response.ok) {
         show(data.error || "Gagal memuat konfigurasi.", "err");
@@ -715,9 +788,11 @@ function renderAdminHtml(config) {
       }
       const response = await fetch("/api/admin/env", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...headers() },
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ values })
       });
+      if (response.status === 401) { handleUnauthorized(); return; }
       const data = await response.json();
       if (!response.ok) {
         show((data.errors || [data.error || "Gagal menyimpan .env."]).join("\\n"), "err");
@@ -726,9 +801,16 @@ function renderAdminHtml(config) {
       show(data.message || "Tersimpan.", "ok");
     }
 
+    async function logout() {
+      try {
+        await fetch("/admin/logout", { method: "POST", credentials: "same-origin" });
+      } catch (e) { /* ignore */ }
+      location.href = "/admin";
+    }
+
     reloadBtn.addEventListener("click", loadConfig);
     saveBtn.addEventListener("click", saveConfig);
-    adminToken.addEventListener("change", loadConfig);
+    logoutBtn.addEventListener("click", logout);
     copyWebhookBtn.addEventListener("click", async () => {
       const base = document.querySelector("[name=PUBLIC_BASE_URL]")?.value || location.origin;
       const webhook = base.replace(/\\/$/, "") + "/webhook";
@@ -738,6 +820,236 @@ function renderAdminHtml(config) {
 
     loadConfig();
   </script>
+</body>
+</html>`;
+}
+
+function renderLoginHtml() {
+  return `<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login - Archive Bot Admin</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0b1220;
+      --panel: #131c2e;
+      --text: #e6ecf5;
+      --muted: #94a3b8;
+      --line: #243049;
+      --accent: #4c8dff;
+      --accent-2: #7aa8ff;
+      --err: #ef4444;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f4f6fb;
+        --panel: #ffffff;
+        --text: #0f172a;
+        --muted: #64748b;
+        --line: #e2e8f0;
+        --accent: #1d4ed8;
+        --accent-2: #2563eb;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Inter, Arial, sans-serif;
+      background:
+        radial-gradient(900px 500px at 90% -10%, rgba(76,141,255,.18), transparent 60%),
+        radial-gradient(700px 400px at -10% 110%, rgba(16,185,129,.10), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(420px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .logo {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #22d3ee);
+      display: grid; place-items: center;
+      color: white; font-weight: 800; font-size: 18px;
+      box-shadow: 0 6px 20px rgba(76,141,255,.4);
+    }
+    h1 { font-size: 18px; margin: 0; }
+    .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 650;
+      margin: 14px 0 6px;
+    }
+    input[type=password] {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      font: inherit;
+      font-size: 14px;
+      outline: none;
+    }
+    input[type=password]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(76,141,255,.18);
+    }
+    button {
+      margin-top: 16px;
+      width: 100%;
+      padding: 12px 14px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: white;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 650;
+      cursor: pointer;
+      transition: filter .15s ease;
+    }
+    button:hover:not(:disabled) { filter: brightness(1.1); }
+    button:disabled { opacity: .6; cursor: progress; }
+    .err {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(239,68,68,.10);
+      border: 1px solid rgba(239,68,68,.4);
+      color: var(--err);
+      font-size: 13px;
+      display: none;
+    }
+    .err.show { display: block; }
+    .hint {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+    a { color: var(--accent-2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <form class="card" id="loginForm" autocomplete="on">
+    <div class="brand">
+      <div class="logo">A</div>
+      <div>
+        <h1>Archive Bot Admin</h1>
+        <div class="sub">Masukkan password untuk lanjut</div>
+      </div>
+    </div>
+
+    <label for="password">Password admin</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+
+    <button type="submit" id="submitBtn">Masuk</button>
+    <div class="err" id="err"></div>
+
+    <div class="hint"><a href="/">← kembali ke dashboard</a></div>
+  </form>
+  <script>
+    const form = document.querySelector("#loginForm");
+    const password = document.querySelector("#password");
+    const btn = document.querySelector("#submitBtn");
+    const err = document.querySelector("#err");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      err.classList.remove("show");
+      btn.disabled = true;
+      btn.textContent = "Memeriksa...";
+
+      try {
+        const response = await fetch("/admin/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ password: password.value })
+        });
+        const data = await response.json();
+
+        if (response.ok && data.ok) {
+          location.href = "/admin";
+          return;
+        }
+
+        err.textContent = data.error || "Login gagal.";
+        err.classList.add("show");
+        password.select();
+      } catch (e) {
+        err.textContent = "Network error: " + e.message;
+        err.classList.add("show");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Masuk";
+      }
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function renderSetupRequiredHtml() {
+  return `<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Setup Required - Archive Bot</title>
+  <style>
+    body {
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Inter, Arial, sans-serif;
+      background: #0b1220;
+      color: #e6ecf5;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      margin: 0;
+    }
+    .card {
+      max-width: 520px;
+      background: #131c2e;
+      border: 1px solid #243049;
+      border-radius: 14px;
+      padding: 28px;
+      line-height: 1.55;
+    }
+    h1 { margin: 0 0 12px; font-size: 18px; color: #f59e0b; }
+    code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 4px; }
+    pre { background: rgba(0,0,0,.35); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>⚠ ADMIN_TOKEN belum diset</h1>
+    <p>Panel admin tidak bisa diakses dari internet sebelum kamu mengisi <code>ADMIN_TOKEN</code> di file <code>.env</code>.</p>
+    <p>Generate token random di terminal VPS:</p>
+    <pre>openssl rand -hex 32</pre>
+    <p>Tempel hasilnya ke field <code>ADMIN_TOKEN</code> di <code>/opt/archive-manager-bot/.env</code>, lalu restart:</p>
+    <pre>sudo systemctl restart archive-bot</pre>
+    <p>Setelah itu refresh halaman ini, kamu akan dapat form login.</p>
+  </div>
 </body>
 </html>`;
 }
