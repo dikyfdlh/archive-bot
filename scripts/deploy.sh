@@ -33,7 +33,7 @@ if [[ "$BEFORE" == "$AFTER" ]]; then
 fi
 
 echo "==> Syntax check"
-sudo -u "$APP_USER" /usr/bin/node "$APP_DIR/scripts/check-syntax.mjs"
+sudo -u "$APP_USER" bash -c "cd '$APP_DIR' && /usr/bin/node scripts/check-syntax.mjs"
 
 echo "==> Restart archive-bot"
 systemctl restart archive-bot
